@@ -1,0 +1,242 @@
+基于以上的分析，在不考虑生物离子通道行为的情况下，将输入电流随时间积分直至膜电位达到阈值的模型称为IF模型。而LIF模型通过在IF模型中引入“漏电”项，反映了当细胞内未达到某种平衡状态时离子通过膜的扩散。由于其简单性和低计算成本，LIF模型及其变体是应用最广泛的脉冲神经元模型之一。我们用如下方程来描述LIF模型的动力学：
+
+\begin{equation}
+    \tau_m\frac{\diff v(t)}{\diff t}=-v(t)+\mbs w^\top \mbs x(t)-v_{\mathrm{th}}\sum_j\delta(t-t_j).
+\label{LIF_eq}
+\end{equation}
+
+这里，$v(t)$是膜电位，$\tau_m$是膜时间常数，$\mbs x(t)$是突触前输入，$\mbs w$是权重向量，$v_{\mathrm{th}}$是脉冲发放的阈值。最后一项中包含所有突触后尖峰时间$t_j$和的总和是狄拉克函数$\delta(\cdot)$。出于计算考虑，我们将膜电位的静息状态设置为零。观察神经元行为，可以发现神经元在放电后，膜电位会迅速下降。当神经元执行硬复位，其膜电位将被重置为静息电位；当神经元执行软复位，膜电位会减去一个阈值。本文采用软复位LIF模型。我们使用离散时间步长来离散化方程\ref{LIF_eq}，产生以下形式的离散递归模型：
+
+\begin{align}
+\label{LIFeq}
+    v_t &= \alpha v_{t-1} - v_{\text{th}} s_{t-1} + \mbs{w}^\top \mbs{x}_t \\
+    s_t &= H(v_t - v_{\text{th}})
+\end{align}
+
+这里，输入$\mbs{x}$的时间积分由突触权重向量$\mbs{w}$进行加权，这为不同的突触提供了不同的权重。$\alpha = 1-h/\tau_m$是与离散时间步长和膜时间常数相关的衰减系数。结合膜电压的循环动态，我们设置了脉冲膜电位阈值。因此，如果膜电位在时间步$t-1$达到阈值$v_{\text{th}}$，细胞会激发突触后，脉冲$s_t$，并且电压在下一个时间步减少$v_{\text{th}}$。LIF神经元的目标是通过使用输入脉冲序列中的时间关系来递归计算其自身输入的局部预测，具体的规则我们将在后续给出。
+
+在SNN网络中，外部刺激信号唯有经特定神经元编码为动作电位，方可被神经系统处理。信息编码方法的选定，是研究生物感知行为的必要前提。当前，最为常见的编码方法涵盖脉冲频率编码、脉冲时间编码以及神经元群体编码\cite{niuResearchProgressSpiking2023}。
+
+其中，频率编码借助单位时间内神经元脉冲发放的频率来表征输入信息，基于脉冲频率的编码包含基于脉冲计数、脉冲密度的编码方式。脉冲时间编码作为一种常用的精确脉冲时间编码手段，则依据脉冲发生的精确时间对信息进行编码。神经元群体编码是按照神经元群的活动强度来编码输入信息。
+
+我们的网络基于认知地图概念构建，将输入信号映射至神经元网络。认知地图把连续空间映射为离散空间，把复杂的环境信息压缩到低维空间。在我们的网络中，每个神经元都对应一个位置。当输入信号抵达，会被编码成一个脉冲序列，该序列的发放时间将被记录。这些记录用于更新神经元的权重，以此实现对环境的学习。而奖励细胞根据智能体的行为，发放奖励脉冲。奖励脉冲的发放时间将被记录，用于更新奖励细胞的权重，以此实现对智能体行为的优化。这基于发放强度的脉冲频率，同时高强度的发放也能够激活重播过程。
+
+在实际权重更新过程中，不同细胞群体具有不同的编码逻辑。位置细胞作为编码连续空间的细胞，其放电强度与智能体位置紧密相关，故而采用基于高斯位置场和脉冲频率的编码模式。而网格细胞编码抽象的空间序列节点，运用精确的事件序列进行编码，位置与神经元存在具体对应关系，采用的是基于神经元群体编码和脉冲时间编码的复合编码逻辑。 
+在神经网络的工程实现中，通常采用确定性近似，忽略分布的随机性，假设变分分布 $q(\hat{\mbs x})$ 退化为delta函数——即模型信念集中于单一预测值 $\hat{\mbs x}$，无不确定性。此时，变分分布的对数期望 $\Exp_q[\ln q(\hat{\mbs x})]$ 为常数记作$C$，自由能的核心贡献来自“先验与似然的权衡”，因此简化为：
+\begin{equation}
+F \propto C - \left[ \ln p(\hat{\mbs x}) + \ln p(\mbs x|\hat{\mbs x}) \right].
+\end{equation}
+
+该简化形式的物理意义清晰：当预测 $\hat{\mbs x}$ 符合先验（$p(\hat{\mbs x})$ 大）且与输入匹配（$p(\mbs x|\hat{\mbs x})$ 大）时，自由能 $F$ 小，模型信念与数据一致；当预测违背先验（$p(\hat{\mbs x})$ 小）或与输入冲突（$p(\mbs x|\hat{\mbs x})$ 小）时，自由能 $F$ 大，模型需调整参数以减少冲突。这正符合预测编码理论基于预测误差的学习策略。
+
+\xsubsection{基于自由能和奖励驱动的局部信息损失函数}{Figures}
+接下来我们将基于LIF模型和自由能原理，推导符合我们要求的局部信息奖励驱动的损失函数。
+
+我们首先假定，将SNN各层神经元的输入$x_j^l$视为随机变量，相邻层满足条件高斯分布。
+\begin{equation}
+p\left(x_{j}^{l} \mid \mbs x^{l-1}\right)=\mathcal{N}\left(x_{j}^{l} ; \hat{x}_{j}^{l}, \Sigma_{j}^{l}\right)
+\label{eq:gauss}
+\end{equation}
+其中 $\hat{x}_j^l$ 是下层预测的“期望脉冲输入”，$\Sigma_j^l$ 为固定方差（不随训练更新），确保推导简化且符合生物神经元的噪声特性。
+
+并且，我们还考虑马尔可夫性假设：第 $l$ 层神经元输入仅依赖第 $l-1$ 层输入，与更早层无关，该假设使联合概率可分解为各层条件概率的乘积，大幅降低计算复杂度。第 $l$ 层神经元膜电位通过整合前一层的输入累积，首次达阈时发放脉冲，动力学满足：
+\begin{equation}
+V_{j}^{l}(\mbs x) = \sum_{i} w_{j i}^{l}\delta\left(v_{\mathrm{th}} - x_{i}^{l-1}\right)
+\end{equation}
+其中 $w_{ji}^l$ 为突触权重，$\delta(\cdot)$ 为狄拉克函数（仅前层神经元输入为 $x_{i}^{l-1}$ 时贡献输入），这一约束确保自由能推导与SNN的脉冲编码机制一致（输入变量为 $\mbs x$）。
+
+在这些假设下，模型的学习过程，可看作是求参数的最大似然值。为了实现这一目标，Friston从技术上证明，我们必须最大化给定输入的概率函数\cite{fristonTheoryCorticalResponses2005}，由于对数函数是单调递增函数，最大化联合概率等价于最大化其对数形式。出于优化目标为最小化自由能的考虑，我们将自由能$F$定义为对数联合概率的负值：
+\begin{equation}
+F = - \ln p\left(\mbs x^{1}, \mbs x^{2}, \dots, \mbs x^{l_{max}} \mid \mbs x^{0}\right)
+\end{equation}
+代入联合概率的分解式，得到：
+\begin{equation}
+F =- \ln p\left(\mbs x^{1}, \mbs x^{2}, \dots, \mbs x^{l_{max}} \mid \mbs x^{0}\right) = \sum_{l=1}^{l_{max}} \ln p\left(\mbs x^{l} \mid \mbs x^{l-1}\right)
+\end{equation}
+考虑条件概率的高斯分布形式\ref{eq:gauss}。由于同一层神经元的活动相互独立，第$l$层的条件概率对数可进一步分解为单个神经元的求和：
+\begin{equation}
+- \ln p\left(\mbs x^{l} \mid \mbs x^{l-1}\right) =- \sum_{j=1}^{n^l} \left[ \ln\left(\frac{1}{\sqrt{2\pi}\Sigma_j^l}\right) - \frac{(x_j^l - \hat{x}_j^l)^2}{2\Sigma_j^l} \right]
+\end{equation}
+
+由于$\Sigma_j^l$为常数（不随训练更新），因此$\ln\left(\frac{1}{\sqrt{2\pi}\Sigma_j^l}\right)$是与优化目标无关的常数项，可忽略。最终自由能简化为预测误差的加权和（权重为$1/\Sigma_j^l$）：
+\begin{equation}
+F_{\text{pred}} = \frac{1}{2} \sum_{l=1}^{l_{max}} \sum_{j=1}^{n^l} \frac{(x_j^l - \hat{x}_j^l)^2}{\Sigma_j^l}. 
+\end{equation}
+
+这一自由能试图基于减少预测误差，实现模型对输入数据的精准预测，从而达成无监督学习的效果。然而，生物并不止于无监督学习，仅依靠输入预测误差，在有奖励或特异性的条件下效力不足，无法区分目标序列与异序列——当输入为与任务无关的异序列时，模型仍会尝试最小化预测误差，导致无关突触权重被强化，干扰目标序列的学习。我们接下来将从预测编码和自由能的角度，在自由能中引入奖励项。
+
+基于对有监督学习的需求，我们自然地考虑引入奖励信号 $R_{t,k}$ 模拟生物系统中的多巴胺（DA）奖励机制，动态调制不同时刻、不同神经元的学习权重——奖励值越大，对应神经元的权重更新越显著。将奖励信号作为加权因子引入扩展自由能，并且考虑到对神经元输出的目标序列的预测，我们将自由能扩展为全局奖励自由能：
+\begin{equation}
+F_{\text{total}} =R( F_{\text{pred}} + \mu D_{\text{KL}}(p_{\text{distractor}} \| p_{\text{target}})). 
+\label{eq:F}
+\end{equation}
+
+其中 $\mu$ 为正则系数，控制目标序列和无关输入的差别在总自由能中的相对重要性。$p_{\text{target}}$和$p_{\text{distractor}}$分别是目标序列和无关输入的概率分布。出于计算考虑，我们假设目标序列与异序列的层级分布均为同方差高斯分布（输入为$\mbs x$），这一假设在生物上是合理的，对于神经元的生理活动，同一神经元在不同神经活动中的方差可看作是环境中化学信号和膜蛋白的通透性，因此在不同序列中的分布方差应当是接近的。由此，我们考虑两种概率分布：
+\begin{enumerate}
+    \item 目标序列分布：$p_{\text{target}}(\mbs x^l) = \prod_{j=1}^{n^l} \mathcal{N}(x_j^l; \mu_{\text{tar},j}^l, \sigma^2)$，其中 $\mu_{\text{tar},j}^l$ 是目标序列第 $l$ 层第 $j$ 个神经元的输入特征均值；
+    \item 异序列分布：$p_{\text{distractor}}(\mbs x^l) = \prod_{j=1}^{n^l} \mathcal{N}(x_j^l; \mu_{\text{cur},j}^l, \sigma^2)$，其中 $\mu_{\text{cur},j}^l$ 是当前序列第 $l$ 层第 $j$ 个神经元的输入特征均值（由输入序列与资格痕迹共同决定）。
+\end{enumerate}
+
+对于两个同方差高斯分布，KL散度的解析解为（推导见附录）：
+\begin{equation}
+D_{\text{KL}}(p_{\text{distractor}} \| p_{\text{target}}) = \frac{1}{2\sigma^2} \|\mu_{\text{cur}} - \mu_{\text{tar}}\|^2
+\end{equation}
+
+该式表明，KL散度与当前序列均值与目标序列均值的差异平方成正比，差异越大，KL散度越大。为了更好地度量预测的一致性，我们基于高斯分布的归一化定义一致性评分：
+\begin{equation}
+\Gamma_{t,k} = \exp\left( -\frac{1}{2\sigma^2} \|\mu_{\text{cur},k}^t - \mu_{\text{tar},k}^t\|^2 \right)
+\end{equation}
+
+可以发现，$\Gamma_{t,k} \in [0,1]$ 量化当前序列与目标序列的匹配度：$\Gamma=1$ 表示完全匹配目标序列，$\Gamma\approx 0$ 表示当前输入为非目标噪声输入。然而，在实际的训练中，我们无法直接得到分布的均值 $\mu_{\cdot,j}^l$，这是由于对每个时间的输入$\mbs x$，不包含历史信息。这一问题是所有生物有监督学习都会面临的重要问题，在生物的有监督学习过程中，大脑的核心功能是学习预测生物学相关价值的刺激，尤其是奖励。
+
+在生物实验中，中性事件（例如特定的声音、气味、空间位置或特定动作，称为条件刺激，CS）与内在激活事件（例如奖励或惩罚，称为非条件刺激，US）相关联。而在实验和现实生活中，非条件刺激（US）通常与条件刺激（CS）存在时间上的延迟。在这种形式的强化学习中，由条件刺激引起的神经元活动在时间上与非条件刺激的时间并不重叠，因此如何找到这些事件之间的相关性就成了一个问题。这被称为远端奖励问题\cite{izhikevichSolvingDistalReward2007}。针对该问题提出的解决方案假设条件刺激存在一个对输入的短期记忆，称为\text{资格痕迹}，该痕迹在非条件刺激出现时仍然活跃\cite{crow1968cortical}。当前已有多项实验在多种生物和脑区发现了资格痕迹的证据\cite{shouvalEligibilityTracesSynaptic2025}。
+
+资格痕迹是神经元在不同时间步下形成连续信号学习的必要机制。基于这一考虑，我们同时引入了一阶时序信息资格痕迹，以及基于资格痕迹的二阶信息\textbf{时序痕迹}（Temporal Trace）。资格痕迹是一种对神经元活动时间信息的记录机制，而时序痕迹是一种对神经元序列信息的记录机制。我们通过时序痕迹隐式记录目标序列的相对时序关系（而非绝对时间位置）。时序痕迹存储的是“多次训练的统计平均模式”，对应生物突触可塑性的“代谢记忆”特性——通过重复强化稳定时序关系，而非记录单次序列的精确时间印记。
+
+在我们的模型中，资格痕迹$\mbs p$被视作突触权重对膜电位的影响强度$\mbs p_{t} \equiv\nabla_{\mbs w} v_t$，是关联权重与神经元活性的核心变量。基于这一定义，资格迹的递归更新规则如下，其中$\alpha$为衰减系数，控制历史信息的保留时长：
+\begin{equation}
+p_{t,j,k} = \alpha p_{t-1,j,k} + \delta_{t,j,k}. 
+\end{equation}
+
+对这一定义的合理性，我们将在后续的梯度推导中进行分析。基于资格痕迹，我们的模型为每个突触$j$维护时序痕迹${\xi_{t,j,k}}$，类似地，时序痕迹通过滑动平均更新，其中$\gamma \in [0,1]$为稳定性因子：
+
+\begin{equation}
+\xi_{t,j,k} = \gamma\xi_{t,j,k} + (1-\gamma) p_{t,j,k}
+\end{equation}
+
+时序迹不依赖绝对时间点，而是通过资格迹的衰减特性自然编码元素间相对出现顺序。由此资格痕迹和时序痕迹的匹配机制，考虑近似$\mu_{\text{cur},k}^t \approx \Exp _j (p_{t,j,k})$和$\mu_{\text{tar},k}^t \approx \Exp _j (\xi_{t,j,k})$，此处的$\Exp _j(\cdot)$表示对所有$j$的加权平均。简便起见，我们将一致性评分拆分，并基于近似改写为：
+\begin{equation}
+\Gamma_{t,j,k} = \exp\left( -\frac{1}{2\sigma^2} \|\xi_{t,j,k} - p_{t,j,k}\|^2 \right)
+\end{equation}
+其中，资格迹差异容限$\sigma^2$控制了一致性评分的敏感度，$\sigma^2$越小，一致性评分越敏感，即对当前序列与目标序列的匹配度要求越高。对该式取自然对数并整理，可得：
+\begin{equation}
+\|\xi_{t,j,k} - p_{t,j,k}\|^2 = -2\sigma^2 \ln \Gamma_{t,j,k}
+\end{equation}
+
+由于 $\Gamma_{t,j,k} \in [0,1]$ 时，利用泰勒展开一阶近似 $\ln \Gamma \approx \Gamma - 1$，代入得：
+\begin{equation}
+\|\xi_{t,j,k} - p_{t,j,k}\|^2 \approx  2\sigma^2 (1- \Gamma_{t,j,k})
+\end{equation}
+最终，我们将资格迹作为调制因子引入KL散度，确保对应非目标抑制作用的突触特异性，得到：
+\begin{align}
+D_{\text{KL}}(p_{\text{distractor}} \| p_{\text{target}}) &=  \frac{1}{2\sigma^2} \|\mu_{\text{cur}} - \mu_{\text{tar}}\|^2 \\
+ &\approx \frac{1}{2\sigma^2} \|\xi_{t,j,k} - p_{t,j,k}\|^2 \\
+&\approx (1- \Gamma_{t,j,k})\\
+&\propto (1 - \Gamma_{t,j,k}) \|p_{t,j,k}\|^2
+\end{align}
+
+综合以上推导，我们结合\ref{eq:F}，得到：
+\begin{equation}
+F_{\text{total}} = \frac{1}{2} \sum_{t,k} R_{t,k} \left (  \frac{\left \| \mbs x_{t,k} - \hat{\mbs x}_{t,k} \right \|^2}{\Sigma_{k}} + \mu (1 - \Gamma_{t,k})\|\mbs p_{t,k}\|^2 \right ) 
+\end{equation}
+
+其中$R_{t,k}$为奖励函数，$\Sigma_{k}$为不同神经元预测误差强度的方差，在自由能中用作加权，$\mu$为正则化系数。
+
+我们基于计算考虑，假设不同神经元在自由能中占据同样的地位，即$\Sigma_{k} = \Sigma$成立。在神经元层面上，我们将自由能的学习规则应用于单神经元的突触可塑性学习中。神经元的目标是通过利用输入脉冲序列中的时间关系递归地计算其自身输入的局部预测。在时间步长$t$时,传入的前突触输入的预测值由相关突触的权重和膜电位的先前状态给出，也就是$\hat{\mbs x}_{t} = v_{t-1} \mbs w_{t-1}$，其中$v_t$为神经元膜电位，那么基于上述自由能的优化，我们提出\textbf{奖励驱动的预测编码时序痕迹损失函数}（Reward-Driven Predictive Loss with Temporal Trace），简单记作RDPL：
+\begin{equation}
+\mathcal{L} = \frac{1}{2} \sum_{t,k} R_{t,k} \left (  \left \| \mbs x_{t,k} - \hat{\mbs x}_{t,k} \right \|^2 + \mu (1 - \Gamma_{t,k})\|\mbs p_{t,k}\|^2 \right ) 
+\label{eq:RDPL}
+\end{equation}
+
+\xsubsection{梯度更新算法推导}{Figures}
+我们提出的RDPL损失表明，神经元通过从当前膜电位状态中提取信息来预测未来的输入。我们的损失函数模型实际是一个随时间变化的优化问题。由于我们的目标损失函数实际是给定时间窗口内的累积误差，我们假设在每个时间步$t$评估当前损失。通过时间反向传播（BPTT）展开计算\cite{werbos2002backpropagation}，可以递归地计算$\mathcal{L}$关于$\mbs w$的梯度。BPTT将时间维度展开为空间维度，通过链式法则计算跨时间步的梯度累积。基于损失函数分解思路，我们有：
+\begin{equation}
+\nabla_{\mbs w} \mathcal {L} = \sum_{t=0}^{T} \frac{1}{2} R_{t} \left( \nabla_{\mbs w} \mathcal{L}_{t}^{\text{pred}} + \frac{\partial\mathcal{L}_{t}^{\text{pred}}}{\partial v_{t-1}} \mbs p_{t-1} + \nabla_{\mbs w} \mathcal{L}_{t}^{\text{match}} \right)
+\end{equation}
+
+其中，$\mathcal{L}_{t}^{\text{pred}} = \left\| \mbs x_{t} - v_{t-1} \mbs w_{t-1} \right\|^2$为预测误差项，衡量当前时刻输入与预测值的偏差；$\mathcal{L}_{t}^{\text{match}} = \mu (1 - \Gamma_{t}) \left\| \mbs p_{t} \right\|^2$：匹配误差项，调控非目标序列对应的突触强度；$\sum_{t=0}^{T}$是BPTT的核心特征，将时间窗口$[0, T]$内所有时刻的梯度贡献累积，实现误差信号的跨时间传递。注意这里$\mathcal{L}_{t}^{\text{match}}$无需在时间维度上反向传播，因为时序痕迹已经利用了时间累计的信息进行计算。
+
+为了简便计算，我们定义：
+\begin{align}
+\mbs \epsilon_{t} &=\mbs x_{t} - v_{t-1}\mbs w_{t-1}\\
+\mathcal{E}_{t} &= \mbs \epsilon_{t}^\top \mbs w_{t-1}
+\end{align}
+
+$\mbs \epsilon_{t}$为局部预测误差；全局误差加权和，$\mathcal{E}_{t}$整合所有输入突触的误差信息，反映整体预测误差。接下来我们分别计算梯度：
+\begin{align}
+\nabla_{\mbs w} \mathcal{L}_{t}^{\text{pred}} &=  -2 v_{t-1}\mbs \epsilon_{t}\\
+\frac{\partial\mathcal{L}_{t}^{\text{pred}}}{\partial v_{t-1}} \mbs p_{t-1} &= -2\mathcal{E}_{t} \mbs p_{t-1}\\
+\nabla_{\mbs w} \mathcal{L}_{t}^{\text{match}} &= 2\mu (1 - \Gamma_{t}) \mbs p_{t}
+\end{align}
+
+整理得到：
+\begin{equation}
+\mbs w_{t} =\mbs w_{t-1} + \eta\sum_{t=0}^T R_{t} \left[ \mbs \epsilon_{t} v_{t-1} + \mathcal{E}_{t,k}\mbs p_{t-1} - \mu (1 - \Gamma_{t}) \mbs p_{t} \right]
+\end{equation}
+
+在上述推导中，我们定义了资格痕迹$\mbs p_{t} \equiv\nabla_{\mbs w} v_t$，对LIF模型\ref{LIFeq}本身进行梯度计算，我们得到：
+\begin{equation}
+\nabla_{\mbs{w}} v_{t}=\left(\alpha-v_{\text {th}} \frac{\partial s_{t-1}}{\partial v_{t-1}}\right) \nabla_{\mbs{w}} v_{t-1}+\mbs{x}_{t}
+\end{equation}
+
+可以发现，第一项包含雅可比矩阵：
+\begin{equation}
+J_t = \frac{\partial v_t}{\partial v_{t-1}} = \alpha - v_{\text{th}} \frac{\partial s_{t-1}}{\partial v_{t-1}} 
+\end{equation}
+
+这表示线性递归项和阈值非线性项对前一时刻的脉冲输出的贡献。我们定义一个影响向量资格痕迹$\mbs p_{t} \equiv \nabla_{\mbs w} v_t$，使其满足递归方程：
+\begin{equation}
+\mbs p_{t} = J_t \mbs p_{t-1} + \mbs{x}_{t}
+\end{equation}
+
+由于$J_t = \alpha - v_{\text{th}} \frac{\partial s_{t-1}}{\partial v_{t-1}} $中的$\frac{\partial s_{t-1}}{\partial v_{t-1}} $在脉冲发放时是不可微的，而通常情况下，通过脉冲机制反向传播梯度的过程会被忽略\cite{neftciSurrogateGradientLearning2019}，因此，我们可以忽略这一项，采用$\alpha$近似这一雅可比矩阵：
+\begin{equation}
+\mbs p_{t} = \alpha \mbs p_{t-1} + \mbs{x}_{t}
+\end{equation}
+
+这一方程给出了资格痕迹前向传播的动态更新机制，即当前时刻的资格痕迹依赖于前一时刻的资格痕迹和当前时刻的输入。基于此，我们得到权重更新的表达式：
+\begin{equation}
+\mbs w_{t} =\mbs w_{t-1} + \eta\sum_{t=0}^T R_{t} \left[ \mbs \epsilon_{t} v_{t-1} + \mathcal{E}_{t,k}\mbs p_{t-1} - \mu (1 - \Gamma_{t}) \mbs p_{t} \right]
+\end{equation}
+
+然而，我们感兴趣的是基于局部信息的学习规则，其中权重更新是模型动态的一部分，并且与突触前输入的预测实时进行。神经元递归地累计权重梯度进行更新在生物上并不是不可行，然而我们更希望用即时的信息进行在线更新，因此我们用以下式子近似学习方程和当前梯度的估计值：
+\begin{equation}
+\mbs{w}_t = \mbs{w}_{t-1} - \eta \nabla_{\mbs{w}} \mathcal{L} \approx \mbs{w}_{t-1} - \eta \nabla_{\mbs{w}} \mathcal{L} _t|_{\mbs{w} = \mbs{w}_{t-1}}
+\end{equation}
+
+最终我们得到了基于预测编码和时序痕迹学习规则的梯度更新公式，我们将这一有奖励预测学习规则（Reward-Driven Predictive Rule）简称为RPR：
+\begin{equation}
+\label{rpr}
+\mbs w_{t} =\mbs w_{t-1} + \eta R_{t} \left[ \mbs \epsilon_{t} v_{t-1} + \mathcal{E}_{t,k}\mbs p_{t-1} - \mu (1 - \Gamma_{t}) \mbs p_{t} \right]
+\end{equation}
+
+其中，$\eta$为学习率（$0 < \eta < 1$），控制权重更新的步长，避免因步长过大导致训练震荡或步长过小导致收敛过慢。奖励信号$R_{t}$通过乘法调制，实现高奖励时刻权重更新更显著的机制。一致性评分$\Gamma_{t} = \exp\left( -\frac{1}{2\sigma^2} \|\mbs \xi_{t} - \mbs p_{t}\|^2 \right)$基于时序痕迹$\mbs \xi_{t}$定义。
+
+可以发现，在RPR学习规则下，突触权重的变化由每个突触处预测误差的加权和与匹配性决定。因此，突触权重会根据输入的可预测性而增强或减弱。所以，如果某个突触的输入被其他突触前输入所预测，则该突触会被抑制；反之，如果该输入能够预测其他突触前输入，则该突触会被增强。这一学习规则能够有效利用输入的时间关系，实现对未来输入的预测和编码。
+
+神经元模型的计算机制遵循算法\ref{algorithm:rpr}。在点神经元近似下，该机制仅依赖神经元内部状态即可实现未来输入的突触水平预测。神经元通过持续优化突触权重分布学习输入特征的有效表征，同时在膜电位动态中累积时空证据，形成兼具适应性与鲁棒性的编码策略。
+
+\begin{algorithm}[H]
+    \caption{奖励驱动的预测编码时序痕迹学习算法（RPR）}\label{algorithm:rpr}
+    \KwData{初始突触权重 $\mbs{w}_0$，初始膜电位 $v_0$，学习率 $\eta$，正则系数 $\mu$，衰减系数 $\alpha$，稳定因子 $\gamma$，一致性容限 $\sigma^2$，输入序列 $\{\mbs{x}_t\}_{t=1}^T$，奖励信号 $\{R_t\}_{t=1}^T$}
+    \KwResult{优化后的突触权重 $\mbs{w}_T$}
+    
+    $t \leftarrow 0$\;
+    $\mbs{w} \leftarrow \mbs{w}_0$，$\mbs{p} \leftarrow \mbs{p}_0$，$\bm{\xi} \leftarrow \bm{\xi}_0$，$v \leftarrow v_0$\;
+    
+    \While{$t \leq T$}{
+        $v_t \leftarrow \sum_{i} w_{i,t-1} \delta(v_{\mathrm{th}} - x_{i,t-1})$\;
+        $\hat{\mbs{x}}_t \leftarrow v_{t-1} \mbs{w}_{t-1}$\;
+        $\mbs{\epsilon}_t \leftarrow \mbs{x}_t - \hat{\mbs{x}}_t$\;
+        $\mathcal{E}_t \leftarrow \mbs{\epsilon}_t^\top \mbs{w}_{t-1}$\;
+        $\mbs{p}_t \leftarrow \alpha \mbs{p}_{t-1} + \delta_t$\;
+        $\mbs{\xi}_t \leftarrow \gamma \mbs{\xi}_{t-1} + (1-\gamma) \mbs{p}_t$\;
+        $\Gamma_t \leftarrow \exp\left(-\frac{1}{2\sigma^2} \|\mbs{\xi}_t - \mbs{p}_t\|^2\right)$\;
+        $\mbs{w}_t \leftarrow \mbs{w}_{t-1} + \eta R_t \left[ \mbs{\epsilon}_t v_{t-1} + \mathcal{E}_t \mbs{p}_{t-1} - \mu (1-\Gamma_t) \mbs{p}_t \right]$\;
+        $v_t \leftarrow V_t$\;
+        $t \leftarrow t + 1$\;
+    }
+    \Return{$\mbs{w}_T$}\;
+\end{algorithm}
+
+我们的学习规则依赖于在生物学上合理的突触机制, 因为它们依靠的是单个神经元层面可获取的局部信息。在这个模型中,突触可塑性取决于突触变量与全局信号之间的相互作用, 而这些全局信号又取决于突触前和突触后的活动以及突触强度。这些过程可以通过诸如NMDA受体、电压门控钙通道（VGCCs）以及通过细胞内信号或膜去极化进行的突触相互作用等局部机制来实现。
+
+对该权重更新算法的分析表明，其构建的近似学习规则具备完全在线学习的核心优势——仅依赖时间步$t$的即时可用信息，通过整合奖励信号、预测误差与匹配误差的加权贡献，高效实现序列信息的动态学习。该规则不仅能精准捕捉输入的时间关联性，完成对未来输入的预测与编码，还能通过动态调整突触权重的增强或衰减，优化对输入特征的有效表征，同时兼顾输入信息的可预测性，实现冗余信号的筛选与关键信号的强化。
+
+在奖励调制机制中，奖励信号$R_t$通过乘法作用动态调控权重更新幅度，使高奖励时刻的突触可塑性显著增强，这一设计利用了奖励信号的时间关联性，为序列预测与编码提供了精准的强化导向。从生物学角度看，这一机制与神经科学的经典发现高度契合：生物体内的奖励信号主要由多巴胺（DA）介导，突触可塑性的缓慢生化动力学特性使其能够对延迟数秒的多巴胺奖励产生敏感响应，多巴胺的释放可显著促进STDP（突触时间依赖性可塑性）中的长时程增强（LTP）效应\cite{izhikevichSolvingDistalReward2007}，而本算法正是通过奖励信号与突触活动的协同调制，复刻了这一神经学上合理的学习机制。具体而言，其生物学对应体现在两方面：一是发放增强效应，发放状态神经元的奖励信号会进一步放大，这与三重突触可塑性（Tripartite Synapse）理论\cite{pereaTripartiteSynapsesAstrocytes2009}一致——突触传递效率同时依赖突触前发放、突触后活性与胶质细胞调控，多巴胺作为神经调质，仅在神经元活性与奖励信号同步时才会显著增强突触可塑性；二是预测误差编码，奖励信号的动态波动（如目标序列完成时的奖励峰值），精准对应Schultz理论中多巴胺神经元编码奖励预测误差的核心特性\cite{diederenDopamineModulatesAdaptive2017}，当实际奖励高于预期时，多巴胺发放率升高，从而强化当前的突触模式与行为策略。
+
+时序迹作为模型捕捉序列时序信息的核心结构，其设计突破了对绝对时间点的依赖，通过资格迹的时间衰减特性自然编码序列元素间的相对出现顺序，形成有序强度分布，用于适配序列学习的核心需求。同时，时序迹通过滑动平均的统计学习过程形成一种“卷积模糊区间”，能够覆盖序列元素持续时间的合理变异范围，赋予模型对时间波动的鲁棒性。时序痕迹这一机制模拟了生物神经网络中的突触竞争与长时程抑制（LTD）过程：生物大脑会根据输入序列的相对时序关系动态调整突触权重，实现对未来输入的预测与编码，而本模型正是通过时序迹与资格迹的匹配判断，对非目标序列（异序列）触发选择性突触抑制，复刻了生物系统中有用突触强化、冗余突触弱化的竞争抑制机制。
+
+从突触机制的生物学合理性来看，该学习规则完全依赖单个神经元层面可获取的局部信息，符合生物神经网络的运作逻辑。模型中，突触可塑性的调控取决于突触局部变量与全局信号的相互作用，而全局信号只含有奖励信号，其余信息均由突触前活动、突触后活性及突触强度共同决定，这一系列过程可通过生物体内的局部生理机制实现——例如NMDA受体的激活、电压门控钙通道（VGCCs）的调控，以及通过细胞内信号传导或膜去极化介导的突触相互作用等，进一步验证了模型在神经科学层面的合理性与可行性。
+
+更为关键的是，该学习规则的推导建立在自由能最小化的理论框架之上，具备坚实的理论基础与生物学合理性。从理论逻辑来看，学习规则通过预测误差项量化实际输入与模型预测的差异，符合预测编码理论的核心主张；同时，通过一致性评分$\Gamma_{t,k}$实现对目标序列的匹配记忆与对异序列的抑制，这一设计既符合突触竞争的生物学原理，又将调控范围局限于单神经元层面，确保了学习的局部性与高效性。在计算特性上，该规则可基于神经元内部的局部信息与输入信号的动态变化实时计算，无需依赖全局复杂信息，具备良好的工程实现性与生物学可行性——携带大量未来信息的关键突触输入会通过权重增强获得优先表征，而冗余的、可由其他输入预测的突触输入则会被下调权重，这种权重分配模式本质上是一种预测性可塑性。正是通过这种选择性的权重优化，神经元能够逐步学会预测未来事件并发出特征性信号，为有机体的适应性行为提供神经层面的支撑。
