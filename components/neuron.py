@@ -32,6 +32,9 @@ class LIFNeuron(nn.Module):
         x: 输入脉冲 [batch_size, n_neurons_in]
         w: 突触权重 [n_neurons_in, n_neurons_out]
         """
+        # 确保x在与w相同的设备上
+        x = x.to(w.device)
+        
         batch_size, n_neurons_in = x.shape
         n_neurons_out = w.shape[1]
         

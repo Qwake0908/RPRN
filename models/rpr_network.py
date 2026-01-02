@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from neuron import LIFNeuron
+from components.neuron import LIFNeuron
 
 class RPRNetwork(nn.Module):
     def __init__(self, layer_sizes, connection_mode='1d', device='cpu'):
@@ -114,13 +114,18 @@ class RPRNetwork(nn.Module):
         for from_idx, to_idx, weight in connections:
             self.weights[layer_idx].data[from_idx, to_idx] = weight
     
-    def save(self, path):
+    def save(self, filename):
         """保存模型参数"""
+        # 确保save文件夹存在
+        os.makedirs('save', exist_ok=True)
+        # 构造完整路径
+        path = os.path.join('save', filename)
         torch.save({
             'layer_sizes': self.layer_sizes,
             'connection_mode': self.connection_mode,
             'state_dict': self.state_dict()
         }, path)
+        print(f"Model saved to {path}")
     
     @classmethod
     def load(cls, path, device='cpu'):

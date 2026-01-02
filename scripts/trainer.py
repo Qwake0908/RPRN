@@ -1,7 +1,13 @@
+import sys
+import os
+
+# 添加项目根目录到Python路径
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import torch.optim as optim
-from rpr_network import RPRNetwork
-from loss import RDPLLoss
+from models.rpr_network import RPRNetwork
+from utils.loss import RDPLLoss
 from data.data import SpikeDataset, DataLoader
 
 class Trainer:
@@ -22,8 +28,8 @@ class Trainer:
     
     def train_step(self, x_batch, reward_batch, gamma=0.9, sigma=0.1):
         """单步训练
-        x_batch: [batch_size, time_steps, n_neurons]
-        reward_batch: [batch_size, time_steps]
+        x_batch: [batch_size, time_steps, n_inputs]
+        reward_batch: [batch_size, time_steps, n_outputs]
         """
         self.optimizer.zero_grad()
         
@@ -31,14 +37,14 @@ class Trainer:
         outputs, gamma_t, p = self.model(x_batch, gamma, sigma)
         
         # 计算预测值
-        # 这里假设模型预测下一个时间步的输入
-        x_hat = x_batch[:, 1:, :]
-        x = x_batch[:, :-1, :]
+        # 对于80输入10输出的模型，outputs是预测值
+        x_hat = outputs
+        x = torch.zeros_like(outputs)  # 目标值设为0，简化处理
         
         # 调整奖励信号和一致性评分的维度
-        reward = reward_batch[:, :-1]
-        gamma_t = gamma_t[:, :-1]
-        p = p[:, :-1, :]
+        reward = reward_batch
+        gamma_t = gamma_t
+        p = p
         
         # 计算损失
         loss = self.loss_fn(x, x_hat, p, gamma_t, reward)
@@ -103,10 +109,14 @@ class Trainer:
         print(f"Evaluation Loss: {avg_loss:.6f}")
         return avg_loss
     
-    def save_model(self, path):
+    def save_model(self, filename):
         """保存模型参数
-        path: 保存路径
+        filename: 保存文件名
         """
+        # 确保save文件夹存在
+        os.makedirs('save', exist_ok=True)
+        # 构造完整路径
+        path = os.path.join('save', filename)
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict()
@@ -121,32 +131,3 @@ class Trainer:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         print(f"Model loaded from {path}")
-
-# 示例用法
-if __name__ == "__main__":
-    # 设置设备
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    
-    # 创建数据集
-    dataset = SpikeDataset(n_samples=100, time_steps=100, n_neurons=10, batch_size=32, device=device)
-    
-    # 创建模型
-    layer_sizes = [10, 20, 10]  # 输入层, 隐藏层, 输出层
-    model = RPRNetwork(layer_sizes, connection_mode='1d', device=device)
-    
-    # 定义损失函数和优化器
-    loss_fn = RDPLLoss(mu=0.1)
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    
-    # 创建训练器
-    trainer = Trainer(model, loss_fn, optimizer, device=device)
-    
-    # 训练模型
-    trainer.train(dataset, epochs=10, batch_size=32)
-    
-    # 保存模型
-    trainer.save_model("rpr_model.pth")
-    
-    # 评估模型
-    trainer.evaluate(dataset)

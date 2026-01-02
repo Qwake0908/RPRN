@@ -33,11 +33,9 @@ class SpikeDataset(Dataset):
             spike = torch.rand(self.time_steps, self.n_neurons) < self.freq
             spike = spike.float()
             
-            # 生成奖励信号：随机时间步给予奖励
-            reward = torch.zeros(self.time_steps)
-            # 在随机位置生成3个奖励点
-            reward_positions = torch.randint(0, self.time_steps, (3,))
-            reward[reward_positions] = 1.0
+            # 生成奖励信号：与神经元相关，默认全为1
+            # R_{t,k}：针对不同时刻t和不同神经元k的奖励信号
+            reward = torch.ones(self.time_steps, self.n_neurons)
             
             data.append(spike)
             rewards.append(reward)
@@ -69,9 +67,9 @@ class SpikeDataset(Dataset):
             spike += background.float()
             spike = (spike > 0).float()
             
-            # 生成奖励信号：在模式出现后给予奖励
-            reward = torch.zeros(self.time_steps)
-            reward[torch.randint(0, self.time_steps, (3,))] = 1.0
+            # 生成奖励信号：与神经元相关，默认全为1
+            # R_{t,k}：针对不同时刻t和不同神经元k的奖励信号
+            reward = torch.ones(self.time_steps, self.n_neurons)
             
             data.append(spike)
             rewards.append(reward)
@@ -134,16 +132,3 @@ class SpikeGenerator:
             current_time = burst_end + inter_burst_interval
         
         return spike.float()
-
-# 示例用法
-if __name__ == "__main__":
-    # 创建数据集
-    dataset = SpikeDataset(n_samples=10, time_steps=50, n_neurons=8)
-    
-    # 获取数据加载器
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
-    
-    for data, reward in dataloader:
-        print(f"Data shape: {data.shape}")
-        print(f"Reward shape: {reward.shape}")
-        break
